@@ -1,0 +1,49 @@
+# --- macOS Specific ---
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+.TemporaryItems
+
+# --- Security (NEVER COMMIT THESE) ---
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+configs/secrets.json
+
+# --- Node.js ---
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# --- Build Artifacts ---
+dist/
+
+# --- Testing & Benchmarking ---
+.reports/
+.claudeprompt/
+runs/
+.eslintcache
+.cache/
+coverage/
+
+# --- IDE Settings ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# --- Environment ---
+env/
+venv/
+.venv/
+
+# --- Claude Code ---
+.claude/
