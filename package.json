@@ -1,12 +1,20 @@
 {
   "name": "crystalfreeze",
   "version": "0.1.0",
-  "private": true,
+  "description": "Interactive WebGL2 ice crystallization simulation with real-time molecular dynamics",
+  "author": "Michael Wu",
+  "license": "MIT",
+  "homepage": "https://mikechwu.github.io/crystalfreeze/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mikechwu/crystalfreeze.git"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
-    "preview": "vite preview"
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "npx tsx tests/slab3d_growth_test.ts && npx tsx tests/layer_readability_test.ts && npx tsx tests/ice_honeycomb_test.ts && npx tsx tests/ice_stability_test.ts"
   },
   "dependencies": {
     "three": "^0.170.0"
