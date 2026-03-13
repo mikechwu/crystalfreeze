@@ -8,6 +8,13 @@ export interface OverlayCallbacks {
   onTemperatureChange?: (temperature: number) => void;
   onSpeedChange?: (speed: number) => void;
   onPropagationRateChange?: (rate: number) => void;
+  onHbondToggle?: (enabled: boolean) => void;
+  onORadiusChange?: (r: number) => void;
+  onHRadiusChange?: (r: number) => void;
+  onBondWidthChange?: (w: number) => void;
+  onHbondWidthChange?: (w: number) => void;
+  onZLayerCountChange?: (count: number) => void;
+  onZLayerSpacingChange?: (spacing: number) => void;
 }
 
 export class Overlay {
@@ -80,8 +87,40 @@ export class Overlay {
           </div>
         </div>
         <div class="setting-row">
-          <label>Propagation Rate <span class="prop-rate-value">1.2%</span></label>
-          <input type="range" class="prop-rate-slider" min="2" max="40" value="12" />
+          <label>Propagation Rate <span class="prop-rate-value">0.20%</span></label>
+          <input type="range" class="prop-rate-slider" min="2" max="200" value="20" />
+        </div>
+        <div class="setting-row">
+          <label>Show H-bonds</label>
+          <label class="toggle-switch">
+            <input type="checkbox" class="hbond-toggle" />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div class="setting-row">
+          <label>O Radius <span class="o-radius-value">0.22</span></label>
+          <input type="range" class="o-radius-slider" min="8" max="40" value="22" />
+        </div>
+        <div class="setting-row">
+          <label>H Radius <span class="h-radius-value">0.09</span></label>
+          <input type="range" class="h-radius-slider" min="4" max="30" value="9" />
+        </div>
+        <div class="setting-row">
+          <label>Bond Width <span class="bond-width-value">0.07</span></label>
+          <input type="range" class="bond-width-slider" min="2" max="15" value="7" />
+        </div>
+        <div class="setting-row">
+          <label>H-Bond Width <span class="hbond-width-value">1.0</span></label>
+          <input type="range" class="hbond-width-slider" min="5" max="30" value="10" />
+        </div>
+        <div class="section-header sub-section">3D Lattice</div>
+        <div class="setting-row">
+          <label>Z Layers <span class="z-layer-count-value">3</span></label>
+          <input type="range" class="z-layer-count-slider" min="2" max="4" value="3" step="1" />
+        </div>
+        <div class="setting-row">
+          <label>Z Layer Spacing <span class="z-layer-spacing-value">16</span></label>
+          <input type="range" class="z-layer-spacing-slider" min="8" max="28" value="16" />
         </div>
       </div>
     `;
@@ -158,9 +197,83 @@ export class Overlay {
     const propValue = this.panel.querySelector('.prop-rate-value');
     if (propSlider) {
       propSlider.addEventListener('input', () => {
-        const rate = parseInt(propSlider.value, 10) / 1000;
-        if (propValue) propValue.textContent = `${(rate * 100).toFixed(1)}%`;
+        const rate = parseInt(propSlider.value, 10) / 10000;
+        if (propValue) propValue.textContent = `${(rate * 100).toFixed(2)}%`;
         this.callbacks.onPropagationRateChange?.(rate);
+      });
+    }
+
+    // H-bond toggle handler
+    const hbondToggle = this.panel.querySelector('.hbond-toggle') as HTMLInputElement;
+    if (hbondToggle) {
+      hbondToggle.addEventListener('change', () => {
+        this.callbacks.onHbondToggle?.(hbondToggle.checked);
+      });
+    }
+
+    // O radius slider
+    const oRadiusSlider = this.panel.querySelector('.o-radius-slider') as HTMLInputElement;
+    const oRadiusValue = this.panel.querySelector('.o-radius-value');
+    if (oRadiusSlider) {
+      oRadiusSlider.addEventListener('input', () => {
+        const r = parseInt(oRadiusSlider.value, 10) / 100;
+        if (oRadiusValue) oRadiusValue.textContent = r.toFixed(2);
+        this.callbacks.onORadiusChange?.(r);
+      });
+    }
+
+    // H radius slider
+    const hRadiusSlider = this.panel.querySelector('.h-radius-slider') as HTMLInputElement;
+    const hRadiusValue = this.panel.querySelector('.h-radius-value');
+    if (hRadiusSlider) {
+      hRadiusSlider.addEventListener('input', () => {
+        const r = parseInt(hRadiusSlider.value, 10) / 100;
+        if (hRadiusValue) hRadiusValue.textContent = r.toFixed(2);
+        this.callbacks.onHRadiusChange?.(r);
+      });
+    }
+
+    // Bond width slider
+    const bondWidthSlider = this.panel.querySelector('.bond-width-slider') as HTMLInputElement;
+    const bondWidthValue = this.panel.querySelector('.bond-width-value');
+    if (bondWidthSlider) {
+      bondWidthSlider.addEventListener('input', () => {
+        const w = parseInt(bondWidthSlider.value, 10) / 100;
+        if (bondWidthValue) bondWidthValue.textContent = w.toFixed(2);
+        this.callbacks.onBondWidthChange?.(w);
+      });
+    }
+
+    // H-bond width slider
+    const hbondWidthSlider = this.panel.querySelector('.hbond-width-slider') as HTMLInputElement;
+    const hbondWidthValue = this.panel.querySelector('.hbond-width-value');
+    if (hbondWidthSlider) {
+      hbondWidthSlider.addEventListener('input', () => {
+        const w = parseInt(hbondWidthSlider.value, 10) / 10;
+        if (hbondWidthValue) hbondWidthValue.textContent = w.toFixed(1);
+        this.callbacks.onHbondWidthChange?.(w);
+      });
+    }
+
+    // Z Layer count slider
+    const zLayerCountSlider = this.panel.querySelector('.z-layer-count-slider') as HTMLInputElement;
+    const zLayerCountValue = this.panel.querySelector('.z-layer-count-value');
+    if (zLayerCountSlider) {
+      zLayerCountSlider.addEventListener('input', () => {
+        const count = parseInt(zLayerCountSlider.value, 10);
+        if (zLayerCountValue) zLayerCountValue.textContent = String(count);
+        this.callbacks.onZLayerCountChange?.(count);
+      });
+    }
+
+    // Z Layer spacing slider
+    const zLayerSpacingSlider = this.panel.querySelector('.z-layer-spacing-slider') as HTMLInputElement;
+    const zLayerSpacingValue = this.panel.querySelector('.z-layer-spacing-value');
+    if (zLayerSpacingSlider) {
+      zLayerSpacingSlider.addEventListener('input', () => {
+        const spacing = parseInt(zLayerSpacingSlider.value, 10);
+        if (zLayerSpacingValue) zLayerSpacingValue.textContent = String(spacing);
+        this.callbacks.onZLayerSpacingChange?.(spacing);
       });
     }
 

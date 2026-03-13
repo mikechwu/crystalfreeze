@@ -20,6 +20,10 @@ class CrystalFreezeApp {
   private theme: Theme;
   private simSpeed: number = CONFIG.simulation.defaultSpeed;
 
+  // Performance profiling — lightweight timing markers
+  private perfLog: { particles: number; freeze: number; render: number } = { particles: 0, freeze: 0, render: 0 };
+  private perfFrameCount: number = 0;
+
   // Viewport offset into the fixed world domain
   // Centers the viewport in the world
   private viewportOffsetX: number = 0;
@@ -79,6 +83,29 @@ class CrystalFreezeApp {
       },
       onPropagationRateChange: (rate: number) => {
         this.freezeSystem.propagationRate = rate;
+      },
+      onHbondToggle: (enabled: boolean) => {
+        this.renderer.setHbondEnabled(enabled);
+      },
+      onORadiusChange: (r: number) => {
+        this.renderer.setORadius(r);
+      },
+      onHRadiusChange: (r: number) => {
+        this.renderer.setHRadius(r);
+      },
+      onBondWidthChange: (w: number) => {
+        this.renderer.setBondWidth(w);
+      },
+      onHbondWidthChange: (w: number) => {
+        this.renderer.setHbondWidth(w);
+      },
+      onZLayerCountChange: (count: number) => {
+        // Update config — affects new lattice site generation
+        (CONFIG.freeze as any).zLayerCount = count;
+      },
+      onZLayerSpacingChange: (spacing: number) => {
+        // Update config — affects new lattice site generation
+        (CONFIG.freeze as any).zLayerSpacing = spacing;
       },
     });
 
@@ -157,7 +184,7 @@ class CrystalFreezeApp {
     const wx = ((worldX % CONFIG.world.width) + CONFIG.world.width) % CONFIG.world.width;
     const wy = ((worldY % CONFIG.world.height) + CONFIG.world.height) % CONFIG.world.height;
 
-    const placed = this.freezeSystem.placeSeed(wx, wy, this.particles.data, this.particles.count);
+    const placed = this.freezeSystem.placeSeed(wx, wy, this.particles.data, this.particles.count, this.particles.eqZ);
     if (placed) {
       console.log(`Seed placed at world (${wx.toFixed(0)}, ${wy.toFixed(0)})`);
     }
@@ -177,10 +204,17 @@ class CrystalFreezeApp {
     // Physics always runs once per frame at full dt for stability.
     // Only freeze propagation is called multiple times for faster crystallization.
     // This prevents unphysical bulk drift at high speed multipliers.
+    const t0 = performance.now();
     this.particles.update(dt);
+    const t1 = performance.now();
     for (let s = 0; s < this.simSpeed; s++) {
-      this.freezeSystem.update(this.particles.data, this.particles.count);
+      this.freezeSystem.update(this.particles.data, this.particles.count, this.particles.eqZ);
     }
+    const t2 = performance.now();
+
+    // Update H-bond lines (before upload) — pass viewport offset for pre-wrapping
+    this.renderer.updateHbonds(this.particles.data, this.particles.count,
+      this.viewportOffsetX, this.viewportOffsetY);
 
     // Upload to GPU
     this.renderer.uploadParticleData(this.particles.data);
@@ -198,6 +232,26 @@ class CrystalFreezeApp {
     const vpWorldW = window.innerWidth / zoom;
     const vpWorldH = window.innerHeight / zoom;
     this.renderer.render(vpWorldW, vpWorldH, this.viewportOffsetX, this.viewportOffsetY);
+    const t3 = performance.now();
+
+    // Performance profiling (lightweight rolling average, logged every 120 frames)
+    this.perfLog.particles += t1 - t0;
+    this.perfLog.freeze += t2 - t1;
+    this.perfLog.render += t3 - t2;
+    this.perfFrameCount++;
+    if (this.perfFrameCount >= 120) {
+      const n = this.perfFrameCount;
+      console.log(
+        `[Perf] particles=${(this.perfLog.particles / n).toFixed(2)}ms ` +
+        `freeze=${(this.perfLog.freeze / n).toFixed(2)}ms ` +
+        `render=${(this.perfLog.render / n).toFixed(2)}ms ` +
+        `total=${((this.perfLog.particles + this.perfLog.freeze + this.perfLog.render) / n).toFixed(2)}ms`
+      );
+      this.perfLog.particles = 0;
+      this.perfLog.freeze = 0;
+      this.perfLog.render = 0;
+      this.perfFrameCount = 0;
+    }
 
     // Update FPS counter
     this.overlay.updateFPS();

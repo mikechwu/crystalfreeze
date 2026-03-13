@@ -94,6 +94,14 @@
   margin-top: 0;
 }
 
+.section-header.sub-section {
+  font-size: 9px;
+  margin-top: 10px;
+  margin-bottom: 6px;
+  color: rgba(255, 255, 255, 0.28);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
 .setting-row {
   display: flex;
   flex-direction: column;
@@ -216,8 +224,63 @@
   font-size: 11px;
 }
 
-.prop-rate-slider {
+.prop-rate-slider,
+.depth-slider {
   margin-top: 4px;
+}
+
+.depth-value {
+  font-family: 'SF Mono', 'Menlo', monospace;
+  font-size: 11px;
+}
+
+/* Toggle switch for H-bond checkbox */
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 36px;
+  height: 20px;
+  flex-shrink: 0;
+}
+
+.toggle-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.toggle-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 10px;
+  transition: background 0.2s ease;
+}
+
+.toggle-slider::before {
+  content: '';
+  position: absolute;
+  height: 14px;
+  width: 14px;
+  left: 3px;
+  bottom: 3px;
+  background: rgba(255, 255, 255, 0.6);
+  border-radius: 50%;
+  transition: transform 0.2s ease;
+}
+
+.toggle-switch input:checked + .toggle-slider {
+  background: rgba(100, 160, 255, 0.5);
+}
+
+.toggle-switch input:checked + .toggle-slider::before {
+  transform: translateX(16px);
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.setting-row .toggle-switch {
+  align-self: flex-end;
 }
 
 .fps-counter {
@@ -255,6 +318,11 @@ body.theme-light .settings-panel h3 {
 body.theme-light .section-header {
   color: rgba(0, 0, 0, 0.35);
   border-bottom-color: rgba(0, 0, 0, 0.06);
+}
+
+body.theme-light .section-header.sub-section {
+  color: rgba(0, 0, 0, 0.28);
+  border-bottom-color: rgba(0, 0, 0, 0.04);
 }
 
 body.theme-light .setting-row label {
@@ -295,6 +363,22 @@ body.theme-light .advanced-toggle-header:hover {
 
 body.theme-light .advanced-section {
   border-left-color: rgba(0, 0, 0, 0.06);
+}
+
+body.theme-light .toggle-slider {
+  background: rgba(0, 0, 0, 0.12);
+}
+
+body.theme-light .toggle-slider::before {
+  background: rgba(0, 0, 0, 0.4);
+}
+
+body.theme-light .toggle-switch input:checked + .toggle-slider {
+  background: rgba(60, 120, 220, 0.4);
+}
+
+body.theme-light .toggle-switch input:checked + .toggle-slider::before {
+  background: rgba(0, 0, 0, 0.7);
 }
 
 body.theme-light .fps-counter {

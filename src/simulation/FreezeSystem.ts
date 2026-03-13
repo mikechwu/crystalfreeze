@@ -1,11 +1,12 @@
 // Freezing front propagation — per-frame alpha spreading via local neighbor rules.
 // Each frame, liquid particles near frozen neighbors get their alpha increased.
-// Once alpha crosses a threshold, the particle is assigned a lattice site.
+// Once alpha crosses a threshold, the particle is assigned a 3D lattice site.
+// Propagation uses true 3D distances (XY periodic, Z confined).
 
 import { CONFIG } from '../config';
 import {
   FLOATS_PER_PARTICLE, OFF_PX, OFF_PY, OFF_ALPHA,
-  OFF_SEED_ID, OFF_EQ_X, OFF_EQ_Y,
+  OFF_SEED_ID, OFF_EQ_X, OFF_EQ_Y, OFF_Z,
 } from '../particles/ParticleSystem';
 import { SpatialHash } from '../utils/SpatialHash';
 import { LatticeSystem } from './LatticeSystem';
@@ -17,8 +18,12 @@ export class FreezeSystem {
   private worldWidth: number;
   private worldHeight: number;
 
-  // Reusable spatial hash for frozen particle lookup
+  // Reusable spatial hash for frozen particle lookup (2D XY; Z checked inline)
   private frozenHash: SpatialHash;
+
+  // Track occupied lattice sites (prevent duplicate assignments)
+  // Key encodes rounded (x, y, z) to prevent collisions
+  private occupiedSites: Set<number> = new Set();
 
   // Mutable temperature: 0.0 = cold (freezing), 1.0 = warm (melting)
   private _temperature: number;
@@ -40,7 +45,9 @@ export class FreezeSystem {
   set temperature(t: number) { this._temperature = Math.max(0, Math.min(1, t)); }
 
   get propagationRate(): number { return this._propagationRate; }
-  set propagationRate(r: number) { this._propagationRate = Math.max(0.002, Math.min(0.04, r)); }
+  set propagationRate(r: number) { this._propagationRate = Math.max(0.0002, Math.min(0.02, r)); }
+
+  getLattice(): LatticeSystem { return this.lattice; }
 
   getSeedRegistry(): SeedRegistry {
     return this.registry;
@@ -49,23 +56,35 @@ export class FreezeSystem {
   /**
    * Place a nucleation seed at world coordinates.
    */
-  placeSeed(wx: number, wy: number, data: Float32Array, count: number): boolean {
-    const seed = this.registry.placeSeed(wx, wy, data, count);
+  placeSeed(wx: number, wy: number, data: Float32Array, count: number, eqZ: Float32Array): boolean {
+    const seed = this.registry.placeSeed(wx, wy, data, count, eqZ);
     return seed !== null;
   }
 
   /**
+   * Compute a unique numeric key for a 3D lattice site (rounded to 1px precision).
+   * Encodes (x, y, z) into a single number for Set<number> lookups.
+   */
+  private siteKey3D(x: number, y: number, z: number): number {
+    const rx = Math.round(x);
+    const ry = Math.round(y);
+    const rz = Math.round(z + 200); // shift z to positive range
+    return rx * 1000000 + ry * 1000 + rz;
+  }
+
+  /**
    * Per-frame freezing front propagation + temperature-dependent melting.
+   * Now uses true 3D distances for propagation and neighbor validation.
    * Temperature controls the balance:
    *   - Below freezeThreshold: freezing proceeds, no melting
    *   - Between thresholds: freezing slows, boundary molecules may melt
    *   - Above meltThreshold: net melting — ice gradually returns to water
    */
-  update(data: Float32Array, count: number): void {
+  update(data: Float32Array, count: number, eqZ: Float32Array): void {
     const seeds = this.registry.getSeeds();
     const hasSeeds = seeds.length > 0;
 
-    const { propagationRadius } = CONFIG.freeze;
+    const { propagationRadius, hexBias } = CONFIG.freeze;
     const propagationRate = this._propagationRate;
     const { freezeThreshold, meltThreshold, meltRate, freezeBias } = CONFIG.temperature;
     const temp = this._temperature;
@@ -73,21 +92,21 @@ export class FreezeSystem {
     const H = this.worldHeight;
     const halfW = W * 0.5;
     const halfH = H * 0.5;
-    const alphaThreshold = 0.15;
+    // Only well-established frozen molecules can propagate freezing.
+    const alphaThreshold = 0.35;
 
-    // Temperature-dependent freezing rate: scales down as temperature rises
-    // At temp=0: full rate. At freezeThreshold: rate=0. Above: no freezing.
+    // Temperature-dependent freezing rate
     const freezeScale = temp < freezeThreshold
       ? freezeBias * (1.0 - temp / freezeThreshold)
       : 0.0;
 
-    // Temperature-dependent melting: above meltThreshold, alpha decays
+    // Temperature-dependent melting
     const meltActive = temp > meltThreshold;
     const meltStrength = meltActive
       ? meltRate * ((temp - meltThreshold) / (1.0 - meltThreshold))
       : 0.0;
 
-    // Rebuild frozen hash
+    // Rebuild frozen hash (2D XY)
     this.frozenHash.clear();
     let hasFrozen = false;
     for (let i = 0; i < count; i++) {
@@ -98,34 +117,42 @@ export class FreezeSystem {
       }
     }
 
-    // Melting pass: reduce alpha for frozen particles when temperature is high
+    // Melting pass
     if (meltActive && hasFrozen) {
       for (let i = 0; i < count; i++) {
         const base = i * FLOATS_PER_PARTICLE;
         const alpha = data[base + OFF_ALPHA];
         if (alpha <= 0) continue;
 
-        // Boundary molecules (lower alpha) melt first — more physically realistic
-        // Molecules deep in the bulk (alpha≈1) resist melting longer
-        const meltEase = 1.0 - alpha * 0.5; // α=0.3 melts faster than α=1.0
+        const meltEase = 1.0 - alpha * 0.5;
         const deltaAlpha = meltStrength * meltEase;
         const newAlpha = Math.max(0, alpha - deltaAlpha);
         data[base + OFF_ALPHA] = newAlpha;
 
-        // If fully melted, reset to liquid state
         if (newAlpha <= 0.01) {
           data[base + OFF_ALPHA] = 0;
           data[base + OFF_SEED_ID] = -1;
           data[base + OFF_EQ_X] = 0;
           data[base + OFF_EQ_Y] = 0;
+          eqZ[i] = 0;
         }
       }
     }
 
     if (!hasSeeds || !hasFrozen) return;
-    if (freezeScale <= 0) return; // too warm for freezing
+    if (freezeScale <= 0) return;
 
-    // Propagate freezing front (temperature-modulated)
+    // Build set of occupied 3D lattice sites
+    this.occupiedSites.clear();
+    for (let i = 0; i < count; i++) {
+      const base = i * FLOATS_PER_PARTICLE;
+      if (data[base + OFF_SEED_ID] >= 0) {
+        const key = this.siteKey3D(data[base + OFF_EQ_X], data[base + OFF_EQ_Y], eqZ[i]);
+        this.occupiedSites.add(key);
+      }
+    }
+
+    // Propagate freezing front (temperature-modulated, 3D-aware)
     for (let i = 0; i < count; i++) {
       const base = i * FLOATS_PER_PARTICLE;
       const alpha = data[base + OFF_ALPHA];
@@ -133,12 +160,15 @@ export class FreezeSystem {
 
       const px = data[base + OFF_PX];
       const py = data[base + OFF_PY];
+      const pz = data[base + OFF_Z];
 
+      // 2D spatial hash query; filter by 3D distance inline
       const neighbors = this.frozenHash.query(px, py, propagationRadius);
 
       let frozenInfluence = 0;
       let closestSeedId = -1;
       let closestDist = Infinity;
+      let frozenNeighborCount = 0;
 
       for (let ni = 0; ni < neighbors.length; ni++) {
         const j = neighbors[ni];
@@ -151,11 +181,26 @@ export class FreezeSystem {
         let dy = data[bj + OFF_PY] - py;
         if (dx > halfW) dx -= W; else if (dx < -halfW) dx += W;
         if (dy > halfH) dy -= H; else if (dy < -halfH) dy += H;
-        const dist = Math.sqrt(dx * dx + dy * dy);
+        const dz = data[bj + OFF_Z] - pz; // Z: not periodic
+        const dist = Math.sqrt(dx * dx + dy * dy + dz * dz); // 3D distance
 
         if (dist < propagationRadius) {
-          const weight = aj * (1.0 - dist / propagationRadius);
+          let weight = aj * (1.0 - dist / propagationRadius);
+
+          // Hexagonal directional bias: favor growth along lattice axes
+          // Applied to XY projection angle (hex symmetry is in the basal plane)
+          if (hexBias > 0) {
+            const neighborSeedId = data[bj + OFF_SEED_ID];
+            const neighborSeed = seeds.find(s => s.id === neighborSeedId);
+            const seedTheta = neighborSeed ? neighborSeed.theta : 0;
+            const angle = Math.atan2(dy, dx); // XY-plane angle
+            const raw = 0.5 + 0.5 * Math.cos(6 * (angle - seedTheta));
+            const hexMod = (1.0 - hexBias) + hexBias * raw * raw;
+            weight *= hexMod;
+          }
+
           frozenInfluence += weight;
+          frozenNeighborCount++;
 
           if (dist < closestDist) {
             closestDist = dist;
@@ -165,23 +210,106 @@ export class FreezeSystem {
       }
 
       if (frozenInfluence > 0) {
-        // Temperature-modulated freezing rate
+        // Lattice-site proximity weighting (3D)
+        if (closestSeedId >= 0) {
+          const proxSeed = seeds.find(s => s.id === closestSeedId);
+          if (proxSeed) {
+            const site = this.lattice.nearestSite(px, py, pz, proxSeed.x, proxSeed.y, proxSeed.theta);
+            let sdx = site.x - px, sdy = site.y - py;
+            if (sdx > halfW) sdx -= W; else if (sdx < -halfW) sdx += W;
+            if (sdy > halfH) sdy -= H; else if (sdy < -halfH) sdy += H;
+            const sdz = site.z - pz;
+            const siteDist = Math.sqrt(sdx * sdx + sdy * sdy + sdz * sdz);
+            const siteRadius = CONFIG.freeze.latticeSpacing * 0.5;
+            const latticeFitness = siteDist < siteRadius
+              ? 1.0 - 0.7 * (siteDist / siteRadius)
+              : 0.3;
+            frozenInfluence *= latticeFitness;
+          }
+        }
+
         const deltaAlpha = frozenInfluence * propagationRate * freezeScale;
-        const newAlpha = Math.min(1.0, alpha + deltaAlpha);
+        let newAlpha = Math.min(1.0, alpha + deltaAlpha);
+
+        if (data[base + OFF_SEED_ID] < 0 && newAlpha > 0.5) {
+          newAlpha = 0.5;
+        }
         data[base + OFF_ALPHA] = newAlpha;
 
-        // Delay lattice site assignment until alpha exceeds threshold.
-        // This gives molecules near the phase boundary time to find
-        // better positions via thermal motion before locking to a site.
+        // Site assignment gating: 3D-aware
         const assignThreshold = CONFIG.freeze.latticeAssignThreshold;
-        if (data[base + OFF_SEED_ID] < 0 && closestSeedId >= 0 && newAlpha >= assignThreshold) {
-          data[base + OFF_SEED_ID] = closestSeedId;
-
+        const minNeighbors = 2;
+        if (data[base + OFF_SEED_ID] < 0 && closestSeedId >= 0
+            && newAlpha >= assignThreshold && frozenNeighborCount >= minNeighbors) {
           const seed = seeds.find(s => s.id === closestSeedId);
           if (seed) {
-            const site = this.lattice.nearestSite(px, py, seed.x, seed.y, seed.theta);
-            data[base + OFF_EQ_X] = site.x;
-            data[base + OFF_EQ_Y] = site.y;
+            const site = this.lattice.nearestSite(px, py, pz, seed.x, seed.y, seed.theta);
+
+            // Strict crystal-continuation check (3D distances for adjacency)
+            // Ice-like honeycomb: coordination cap = 4 (3 in-plane + 1 inter-layer)
+            // This prevents dense blob-like packing and enforces open ring topology.
+            const targetR = CONFIG.freeze.latticeSpacing;
+            const zSpacing = CONFIG.freeze.zLayerSpacing;
+            // 3D adjacency range for honeycomb nearest neighbors
+            const maxNeighborDist = Math.sqrt(targetR * targetR + zSpacing * zSpacing) * 1.15;
+            const adjLo = targetR * 0.70;
+            const adjHi = maxNeighborDist;
+            let adjacentCount = 0;
+            let wouldOverCoordinate = false;
+
+            for (let ni = 0; ni < neighbors.length; ni++) {
+              const j = neighbors[ni];
+              if (j === i) continue;
+              const bj = j * FLOATS_PER_PARTICLE;
+              if (data[bj + OFF_SEED_ID] < 0) continue;
+
+              // 3D distance between equilibrium sites
+              let edx = data[bj + OFF_EQ_X] - site.x;
+              let edy = data[bj + OFF_EQ_Y] - site.y;
+              if (edx > halfW) edx -= W; else if (edx < -halfW) edx += W;
+              if (edy > halfH) edy -= H; else if (edy < -halfH) edy += H;
+              const edz = eqZ[j] - site.z;
+              const eqDist = Math.sqrt(edx * edx + edy * edy + edz * edz);
+
+              if (eqDist >= adjLo && eqDist <= adjHi) {
+                adjacentCount++;
+
+                // Count how many neighbors this existing molecule already has
+                let existingNN = 0;
+                for (let mi = 0; mi < neighbors.length; mi++) {
+                  const k = neighbors[mi];
+                  if (k === j || k === i) continue;
+                  const bk = k * FLOATS_PER_PARTICLE;
+                  if (data[bk + OFF_SEED_ID] < 0) continue;
+                  let ekx = data[bk + OFF_EQ_X] - data[bj + OFF_EQ_X];
+                  let eky = data[bk + OFF_EQ_Y] - data[bj + OFF_EQ_Y];
+                  if (ekx > halfW) ekx -= W; else if (ekx < -halfW) ekx += W;
+                  if (eky > halfH) eky -= H; else if (eky < -halfH) eky += H;
+                  const ekz = eqZ[k] - eqZ[j];
+                  const eDist = Math.sqrt(ekx * ekx + eky * eky + ekz * ekz);
+                  if (eDist >= adjLo && eDist <= adjHi) existingNN++;
+                }
+                // Ice-like coordination cap: max 4 neighbors per molecule
+                // (3 in-plane honeycomb + 1 inter-layer bond)
+                // Old rule: cap=9 allowed close-packed blob formation
+                // New rule: cap=4 enforces open tetrahedral-like topology
+                if (existingNN + 1 > 4) {
+                  wouldOverCoordinate = true;
+                  break;
+                }
+              }
+            }
+
+            if (adjacentCount >= 2 && !wouldOverCoordinate) {
+              const siteKey = this.siteKey3D(site.x, site.y, site.z);
+              if (!this.occupiedSites.has(siteKey)) {
+                this.occupiedSites.add(siteKey);
+                data[base + OFF_SEED_ID] = closestSeedId;
+                data[base + OFF_EQ_X] = site.x;
+                data[base + OFF_EQ_Y] = site.y;
+                eqZ[i] = site.z;
+              }
+            }
           }
         }
       }

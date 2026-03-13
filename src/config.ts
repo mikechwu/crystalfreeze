@@ -42,10 +42,10 @@ export const CONFIG = {
 
   // 3D slab — deep for strong volumetric perspective
   depth: {
-    slabHalf: 50.0,       // z range: [-50, +50] — deep slab for clear front/back
-    focalLength: 250.0,   // very short focal → strong perspective (40% size variation)
-    zSpring: 0.03,        // overdamped O-U restoring spring (soft for wide slab)
-    zNoiseAmp: 9.0,       // z noise amplitude — broad continuous depth spread
+    slabHalf: 60.0,       // z range: [-60, +60] — deeper slab for stronger front/back separation
+    focalLength: 200.0,   // shorter focal → stronger perspective (~50% size variation front-to-back)
+    zSpring: 0.06,        // softer spring — allows more z-spread for visible depth layers
+    zNoiseAmp: 5.0,       // slightly more z noise — wider depth distribution
   },
 
   // Langevin dynamics
@@ -68,8 +68,12 @@ export const CONFIG = {
     epsilonHO: 0.5,         // H-O attraction — very weak translational; torque still effective
     bondLen: 12.0,          // O-H bond length in world pixels
     bondAngleHalf: 0.912,   // half of 104.5 degree bond angle (rad)
+    sigmaHH: 10.0,          // H-H effective diameter (px) — prevents hydrogen collapse
+    epsilonHH: 8.0,         // H-H repulsion strength
     maxForce: 40.0,         // force magnitude cap for stability
     maxTorque: 12.0,        // torque magnitude cap
+    hBondAngularBias: 0.4,  // directional H-bond bias strength (0=none, 1=full cosine modulation)
+    hBondAlphaMin: 0.2,     // minimum alpha for angular bias to activate
   },
 
   // Rendering
@@ -103,11 +107,13 @@ export const CONFIG = {
         oxygenColor: [0.20, 0.45, 0.90] as readonly number[],
         hydrogenColor: [0.85, 0.90, 0.98] as readonly number[],
         bondColor: [0.40, 0.55, 0.80] as readonly number[],
+        hbondColor: [0.20, 0.40, 0.75] as readonly number[],
       },
       light: {
-        oxygenColor: [0.12, 0.35, 0.78] as readonly number[],
-        hydrogenColor: [0.50, 0.58, 0.72] as readonly number[],
-        bondColor: [0.25, 0.38, 0.60] as readonly number[],
+        oxygenColor: [0.10, 0.28, 0.65] as readonly number[],
+        hydrogenColor: [0.38, 0.44, 0.58] as readonly number[],
+        bondColor: [0.20, 0.30, 0.50] as readonly number[],
+        hbondColor: [0.12, 0.25, 0.55] as readonly number[],
       },
     },
     chemical: {
@@ -115,11 +121,13 @@ export const CONFIG = {
         oxygenColor: [0.85, 0.12, 0.12] as readonly number[],
         hydrogenColor: [0.92, 0.92, 0.92] as readonly number[],
         bondColor: [0.55, 0.55, 0.55] as readonly number[],
+        hbondColor: [0.15, 0.35, 0.70] as readonly number[],
       },
       light: {
-        oxygenColor: [0.78, 0.08, 0.08] as readonly number[],
-        hydrogenColor: [0.70, 0.70, 0.70] as readonly number[],
-        bondColor: [0.40, 0.40, 0.40] as readonly number[],
+        oxygenColor: [0.72, 0.06, 0.06] as readonly number[],
+        hydrogenColor: [0.45, 0.45, 0.50] as readonly number[],
+        bondColor: [0.30, 0.30, 0.35] as readonly number[],
+        hbondColor: [0.10, 0.22, 0.50] as readonly number[],
       },
     },
   },
@@ -134,21 +142,35 @@ export const CONFIG = {
     showSeedRadius: false,  // DEBUG: draw seed interaction radius
   },
 
-  // Freezing / crystallization — tighter, more compact structure
+  // Freezing / crystallization — density-calibrated for ice < water density
+  // Hex area/mol = √3/2 × spacing² ≈ 679 px² at 28.0, vs liquid ~646 px²
+  // → ice is ~5% less dense than liquid, matching real ice Ih behavior
   freeze: {
-    latticeSpacing: 20.5,          // hex lattice site spacing (σ * 0.854) — tighter crystal
-    propagationRadius: 36.0,       // how far freezing influence reaches (1.5σ)
-    propagationRate: 0.012,        // alpha increase per frame — visible at x1, scales with speed multiplier
-    springConstant: 55.0,          // very strong spring to lattice site — tighter crystal
-    dampingBoost: 20.0,            // heavy damping in solid: γ=21 at α=1 (was 14)
-    solidNoiseFraction: 0.02,      // 2% thermal noise at α=1 — very tight (was 4%)
-    orientAlignStrength: 14.0,     // strong orientation alignment (was 8)
-    seedRadius: 60.0,              // initial seed radius (px) — ~2.5σ
+    latticeSpacing: 28.0,          // hex lattice site spacing (1.167σ) — ice less dense than water
+    propagationRadius: 42.0,       // how far freezing influence reaches (~1.5× spacing)
+    propagationRate: 0.002,        // alpha increase per frame — slow for structural relaxation, scales with speed multiplier
+    springConstant: 25.0,          // lattice spring — gentler for wider spacing
+    dampingBoost: 20.0,            // heavy damping in solid: γ=21 at α=1
+    solidNoiseFraction: 0.02,      // 2% thermal noise at α=1 — very tight
+    orientAlignStrength: 14.0,     // strong orientation alignment
+    seedRadius: 70.0,              // initial seed radius (px) — ~2.5× spacing
     seedAlphaMin: 0.3,             // minimum alpha at seed edge
-    maxSpringForce: 100.0,         // cap spring force magnitude — increased for tighter spacing
+    maxSpringForce: 100.0,         // cap spring force magnitude
     maxVelocity: 8.0,              // cap particle velocity for stability
-    solidAttractionStrength: 9.0,  // solid-solid neighbor attraction — tighter compactness
-    latticeAssignThreshold: 0.15,  // assign lattice site earlier — more time for spring compaction
+    solidAttractionStrength: 6.0,  // solid-solid neighbor attraction — reduced for wider spacing
+    neighborSpringK: 4.0,          // elastic spring between frozen neighbor pairs — softer for wider lattice
+    freezeDamping: 0.55,           // strong velocity damping — absorbs transition oscillation energy
+    latticeAssignThreshold: 0.25,  // assign lattice site after sufficient alpha — ensures front connectivity
+    hexBias: 0.7,                  // hex directional bias strength (0=isotropic, 1=full cosine² modulation)
+
+    // Thin-slab 3D lattice — HCP-like ABAB stacking along Z
+    // Replaces the old 2D-only lattice: sites are now true 3D (x, y, z).
+    // The layer count varies between 3 and 5 over XY regions for natural variation.
+    zLayerCount: 3,                // base number of Z layers (2–4, UI-adjustable)
+    zLayerSpacing: 16.0,           // vertical spacing between layers (px) — tighter for visual readability
+    zLayerVariation: 1,            // ±variation in local layer count over XY
+    zSlabMargin: 8.0,              // extra Z margin beyond lattice for liquid confinement
+    zSpringK: 0.10,                // spring constant for Z lattice-target (frozen molecules)
   },
 
   // Temperature control — drives freezing/melting balance
