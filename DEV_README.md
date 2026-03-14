@@ -52,7 +52,7 @@ src/
     GrainBoundary.ts         # (placeholder) grain boundary effects
   simulation/
     FreezeSystem.ts          # 3D crystallization front propagation + melting + 3D site keys
-    LatticeSystem.ts         # 3D honeycomb lattice site computation (O(1), ABAB stacking)
+    LatticeSystem.ts         # 3D two-sublattice honeycomb lattice (O(1), ABAB stacking, inverse Bravais)
     SeedRegistry.ts          # Nucleation seed management + 3D site assignment
     FrontDetector.ts         # (placeholder) phase-field front tracking
     PDEField.ts              # (placeholder) PDE-based field extensions
@@ -82,8 +82,11 @@ tests/
   slab3d_patch_test.ts       # 10-molecule 2-layer 3D patch stability
   slab3d_growth_test.ts      # 3D lattice generation + layer variation validation
   ice_honeycomb_test.ts      # Honeycomb sublattice structure validation (ring centers, coordination)
+  ice_ih_structure_test.ts   # Comprehensive ice Ih structure test (10 criteria: coordination, rings, ABAB, density)
   ice_stability_test.ts      # 12-molecule frozen honeycomb patch stability (600 frames)
   layer_readability_test.ts  # Layer distribution, front-layer bias, slab depth validation
+  coord_audit.ts             # One-off coordination audit (confirms 0% coord-4 in honeycomb)
+  structural_diagnostics.ts  # Full structural diagnostics (coordination, O–O distances, 6-ring detection, density)
 ```
 
 ## Particle Data Layout
@@ -169,29 +172,31 @@ Small rotation quaternions are composed via first-order approximation (exact for
 
 ## 3D Lattice System
 
-### Ice-Like Honeycomb Sublattice
+### Two-Sublattice Honeycomb (Ice Ih Basal Plane)
 
-The lattice uses a **honeycomb sublattice** derived from the triangular hex grid by removing 1/3 of sites (ring centers). This creates open 6-member rings matching ice Ih's basal plane topology.
+The lattice uses a **proper two-sublattice honeycomb** construction — the correct oxygen sublattice of ice Ih:
 
-**Ring center rejection** via `isRingCenter(row, col)`:
-```typescript
-const r3 = ((row % 3) + 3) % 3;
-const c3 = ((col % 3) + 3) % 3;
-return (r3 + c3) % 3 === 0;  // 1/3 of sites are ring centers → excluded
+```
+Bravais lattice vectors:
+  a1 = (L, 0)          where L = a√3 ≈ 48.5px
+  a2 = (L/2, 3a/2)     where a = latticeSpacing = 28px
+
+Sublattice A: at Bravais lattice points
+Sublattice B: at Bravais lattice points + (0, a)
 ```
 
-Result: in-plane coordination = 3 (honeycomb), vs 6 (triangular close-packed).
+This gives exact coordination 3 for all interior atoms and open 6-member rings with diameter 2a = 56px. The old `isRingCenter()` method (triangular lattice with 1/3 removal) is kept for backward compatibility but is no longer used by the core lattice logic.
 
 ### ABAB Stacking
 
-- **Even layers (0, 2, 4)**: Honeycomb grid in XY
-- **Odd layers (1, 3)**: Honeycomb grid offset by `(spacing/2, rowSpacing/3)` in seed-local coordinates
+- **Even layers (0, 2)**: Standard honeycomb grid in XY
+- **Odd layers (1, 3)**: Honeycomb grid offset by `(L/3, 0) ≈ (16.17, 0)` in seed-local coordinates
 
-This places odd-layer atoms in the hollows of even layers, creating genuine 3D crystal structure.
+The L/3 offset interleaves odd-layer atoms without overlapping any even-layer positions, matching ice Ih wurtzite-like stacking.
 
 ### Variable Layer Count
 
-`LatticeSystem.localLayerCount(lx, ly)` returns 2, 3, or 4 using a smooth spatial hash at ~150px wavelength. This prevents a uniform stack appearance. Observed distribution: ~24% 3-layer, ~58% 4-layer, ~18% 5-layer.
+`LatticeSystem.localLayerCount(lx, ly)` returns 2, 3, or 4 using a smooth spatial hash at ~150px wavelength. This prevents a uniform stack appearance. Base count is configurable (default 3, ±1 variation).
 
 ### LatticeSite Interface
 
@@ -208,12 +213,12 @@ export interface LatticeSite {
 `LatticeSystem.nearestSite(px, py, pz, seedX, seedY, seedTheta)` returns a `LatticeSite`:
 
 1. Transform to seed-local coordinates (minimum-image XY + rotate by seed theta)
-2. Compute local layer count (3–5)
-3. For each Z layer: apply ABAB offset if odd, find nearest honeycomb site (skip ring centers)
-4. Select site with minimum 3D distance
+2. Compute local layer count (2–4)
+3. For each Z layer: apply ABAB offset `(L/3, 0)` if odd, use inverse Bravais transform to find nearest unit cell, check both sublattice A and B sites in 3×3 neighborhood
+4. Select site with minimum 3D distance (with front-layer bias)
 5. Transform back to world coordinates
 
-Search radius: 4 rows × 5 cols per layer (wider than before to account for ring-center skipping). Max candidates: 20 hex × 5 layers = 100 (bounded, O(1)).
+Max candidates: 9 cells × 2 sublattices × 2–4 layers = 36–72 (bounded, O(1)).
 
 ### 3D Site Keys
 
@@ -239,7 +244,7 @@ siteKey3D(x, y, z) = round(x) * 1_000_000 + round(y) * 1_000 + round(z + 200)
 Deferred until alpha crosses `latticeAssignThreshold` (0.25). Gated by:
 - Minimum 2 frozen neighbors within 3D adjacency range (`sqrt(targetR^2 + zSpacing^2) * 1.15`)
 - **Coordination limit: 4** (3 in-plane honeycomb + 1 inter-layer) — prevents dense blob formation
-- Ring-center exclusion — sites where `isRingCenter(row, col)` returns true are permanently excluded
+- **Inter-layer bond limit: 1** — tracked separately from in-plane bonds; new molecule rejected if it would form >1 inter-layer bond, or if adding it would give any existing neighbor >1 inter-layer bond
 - 3D site key uniqueness check
 - Prevents disconnected clusters and ensures front connectivity
 
@@ -336,7 +341,7 @@ This prevents bulk drift at high speed while accelerating crystallization.
 
 13. **Morse-like tanh springs** — `F = k * tanh(d/sigma) * sigma` saturates force at large displacement instead of growing linearly. Eliminates high-frequency jitter during the liquid-to-solid transition. Applied to both lattice and neighbor springs.
 
-14. **Honeycomb sublattice** — removes 1/3 of triangular lattice sites (ring centers) to create open hex rings with coordination 3, matching ice Ih basal plane topology. Combined with coordination cap 4, prevents the dense blob-like packing of the old close-packed lattice.
+14. **Two-sublattice honeycomb** — proper ice Ih oxygen sublattice with explicit A and B sites on a Bravais lattice (a1=(L,0), a2=(L/2, 3a/2)). All interior atoms have exact coordination 3, with open 6-member rings (diameter 2a=56px). ABAB stacking offset L/3≈16.17px for inter-layer interleaving. Combined with coordination cap 4 and inter-layer bond limit 1, prevents dense blob-like packing.
 
 9. **Premultiplied alpha** — enables correct additive blending of semi-transparent overlapping sprites without sorting.
 
@@ -403,11 +408,14 @@ npx tsx tests/hex_patch_test.ts          # 7-molecule 2D hex patch stability
 npx tsx tests/slab3d_patch_test.ts       # 10-molecule 2-layer 3D patch stability
 npx tsx tests/slab3d_growth_test.ts      # 3D lattice generation + layer variation
 npx tsx tests/ice_honeycomb_test.ts      # Honeycomb sublattice structure validation
+npx tsx tests/ice_ih_structure_test.ts   # Comprehensive ice Ih structure (10 criteria)
 npx tsx tests/ice_stability_test.ts      # 12-molecule frozen honeycomb stability (600 frames)
 npx tsx tests/layer_readability_test.ts  # Layer distribution + front-layer bias validation
+npx tsx tests/coord_audit.ts             # Coordination audit (confirm 0% coord-4)
+npx tsx tests/structural_diagnostics.ts  # Full structural diagnostics (5 categories)
 ```
 
-Tests evaluate: O-O spacing, Z drift from equilibrium, layer separation, translational/rotational KE, coordination, ring-center rejection, honeycomb topology, and energy stability over time.
+Tests evaluate: O-O spacing, Z drift from equilibrium, layer separation, translational/rotational KE, coordination, two-sublattice honeycomb topology, ABAB stacking, ring vacancy, inter-layer coordination, 6-member ring detection, O–O distance distribution, ice vs liquid density comparison, and energy stability over time.
 
 ## Performance Notes
 
@@ -418,5 +426,5 @@ Tests evaluate: O-O spacing, Z drift from equilibrium, layer separation, transla
 - Fragment shader is the bottleneck: per-pixel quaternion rotation + 3 atom depth sort
 - H-bond detection uses separate spatial hash, only computed when enabled
 - 3D lattice adds <5% overhead to freeze system, <1% to physics integration
-- nearestSite O(1) with max 100 candidates (20 hex × 5 layers), called only during site assignment
+- nearestSite O(1) with max 72 candidates (9 cells × 2 sublattices × 4 layers), called only during site assignment
 - Tanh springs add ~1 `Math.tanh()` per frozen particle per frame (~0.05ms at 5000 particles)

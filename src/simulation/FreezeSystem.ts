@@ -255,7 +255,9 @@ export class FreezeSystem {
             const adjLo = targetR * 0.70;
             const adjHi = maxNeighborDist;
             let adjacentCount = 0;
+            let interLayerCount = 0; // new molecule's inter-layer bonds
             let wouldOverCoordinate = false;
+            const zThreshold = zSpacing * 0.5; // |Δz| > this means inter-layer
 
             for (let ni = 0; ni < neighbors.length; ni++) {
               const j = neighbors[ni];
@@ -274,8 +276,19 @@ export class FreezeSystem {
               if (eqDist >= adjLo && eqDist <= adjHi) {
                 adjacentCount++;
 
+                // Track inter-layer bonds for the new molecule
+                // Ice Ih: max 1 inter-layer bond (3 in-plane + 1 inter-layer = 4 total)
+                if (Math.abs(edz) > zThreshold) {
+                  interLayerCount++;
+                  if (interLayerCount > 1) {
+                    wouldOverCoordinate = true;
+                    break;
+                  }
+                }
+
                 // Count how many neighbors this existing molecule already has
                 let existingNN = 0;
+                let existingInterLayer = 0;
                 for (let mi = 0; mi < neighbors.length; mi++) {
                   const k = neighbors[mi];
                   if (k === j || k === i) continue;
@@ -287,13 +300,15 @@ export class FreezeSystem {
                   if (eky > halfH) eky -= H; else if (eky < -halfH) eky += H;
                   const ekz = eqZ[k] - eqZ[j];
                   const eDist = Math.sqrt(ekx * ekx + eky * eky + ekz * ekz);
-                  if (eDist >= adjLo && eDist <= adjHi) existingNN++;
+                  if (eDist >= adjLo && eDist <= adjHi) {
+                    existingNN++;
+                    if (Math.abs(ekz) > zThreshold) existingInterLayer++;
+                  }
                 }
-                // Ice-like coordination cap: max 4 neighbors per molecule
-                // (3 in-plane honeycomb + 1 inter-layer bond)
-                // Old rule: cap=9 allowed close-packed blob formation
-                // New rule: cap=4 enforces open tetrahedral-like topology
-                if (existingNN + 1 > 4) {
+                // Ice Ih coordination cap: max 4 total, max 1 inter-layer
+                // Adding this new molecule as neighbor: check both limits
+                const isInterLayer = Math.abs(edz) > zThreshold;
+                if (existingNN + 1 > 4 || (isInterLayer && existingInterLayer + 1 > 1)) {
                   wouldOverCoordinate = true;
                   break;
                 }

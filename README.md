@@ -11,7 +11,7 @@ Click/tap the canvas to place a nucleation seed. Ice grows outward from the seed
 ## Features
 
 - **Real-time molecular dynamics** — 5,000 water molecules with semi-implicit Euler integration, Morse-like springs, O-O repulsion, H-O hydrogen bonding, H-H repulsion, and thermal noise
-- **Ice-like honeycomb lattice** — open hex rings (1/3 of triangular sites removed), coordination cap 4, ABAB stacking with 2–4 Z layers variable across XY regions
+- **Ice Ih honeycomb lattice** — proper two-sublattice honeycomb (A+B sites on Bravais lattice), coordination 3 in-plane + max 1 inter-layer = 4 total, ABAB stacking with 2–4 Z layers variable across XY regions
 - **Crystallization physics** — freezing front propagation with hex directional bias, 3D lattice-guided growth, temperature-dependent melting
 - **3D depth perception** — perspective scaling, depth-sorted rendering, gentle depth opacity (45% min brightness), subtle fog (35% max)
 - **Per-molecule 3D orientation** — quaternion rotation with depth-correct H-atom occlusion via fragment shader
@@ -79,7 +79,7 @@ Output goes to `dist/` — deploy to any static host (Vercel, Netlify, GitHub Pa
 - **GLSL 300 es** — inline shaders with quaternion rotation (Rodrigues' formula)
 - **Langevin dynamics** — semi-implicit Euler integration with Morse-like (tanh-saturated) springs
 - **Spatial hashing** — O(1) neighbor lookup for force computation and H-bond detection
-- **Honeycomb lattice** — ice-like open hex ring sublattice with ABAB stacking and coordination cap 4
+- **Honeycomb lattice** — two-sublattice ice Ih honeycomb with ABAB stacking (L/3 offset), coordination cap 4 (3 in-plane + 1 inter-layer)
 
 ## License
 

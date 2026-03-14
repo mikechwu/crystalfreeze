@@ -1,13 +1,21 @@
-// Dynamic 3D lattice generation — thin-slab ice-like lattice site computation
+// Dynamic 3D lattice generation — thin-slab ice Ih lattice site computation.
 // Given a seed (position + orientation), computes nearest 3D lattice site for any point.
-// Uses a HONEYCOMB sublattice (1/3 of triangular sites removed) for open hex rings.
-// ABAB layer stacking: even layers use standard honeycomb, odd layers offset.
-// The local number of Z layers varies between 3 and 5 over XY regions
-// using a deterministic smooth function for natural variation.
 //
-// Key difference from HCP: 1/3 of hex grid sites are classified as "ring centers"
-// and excluded. The remaining 2/3 form a honeycomb with coordination 3 per layer,
-// producing open 6-member rings with no center occupancy — matching ice Ih basal plane.
+// Uses a PROPER HONEYCOMB lattice with two explicit sublattices (A and B).
+// This is the correct oxygen sublattice of ice Ih (basal plane):
+//   - Coordination 3 for ALL atoms (not 4 as in the old depleted-triangular approach)
+//   - Open 6-member rings with diameter 2×spacing (56px at spacing=28)
+//   - Each ring has 6 atoms (3 type-A, 3 type-B) — no center occupancy
+//
+// Lattice geometry:
+//   NN distance (A↔B) = a = CONFIG.freeze.latticeSpacing
+//   Bravais lattice parameter = L = a × √3
+//   Bravais vectors: a1 = (L, 0), a2 = (L/2, 3a/2)
+//   Sublattice offset: d_B = (0, a) relative to sublattice A
+//
+// ABAB layer stacking: even layers use standard honeycomb, odd layers offset
+// by (L/3, 0) to interleave with even layers — matching ice Ih wurtzite-like stacking.
+// The local number of Z layers varies between 2 and 4 over XY regions.
 
 import { CONFIG } from '../config';
 
@@ -36,7 +44,7 @@ export class LatticeSystem {
 
   /**
    * Compute how many Z layers exist at a given XY position in seed-local coords.
-   * Returns a value between (base - variation) and (base + variation), clamped to [3, 5].
+   * Returns a value between (base - variation) and (base + variation), clamped to [2, 4].
    * Uses a smooth sin-based hash of seed-local position for deterministic, flicker-free variation.
    */
   localLayerCount(localX: number, localY: number): number {
@@ -79,40 +87,51 @@ export class LatticeSystem {
   }
 
   /**
-   * Check if a hex grid site (row, col) is a "ring center" in the honeycomb sublattice.
-   * Ring centers are the 1/3 of triangular lattice sites that must be removed
-   * to create a honeycomb (open hex rings with no center occupancy).
-   *
-   * In the triangular lattice, removing sites where ((row % 3) + (col % 3)) % 3 == 0
-   * leaves a honeycomb with coordination 3.
+   * Legacy ring-center check (kept for backward compatibility with older tests).
+   * The new honeycomb lattice does NOT use this — it uses explicit two-sublattice construction.
    */
   isRingCenter(row: number, col: number): boolean {
-    // Normalize to positive modular arithmetic
     const r3 = ((row % 3) + 3) % 3;
     const c3 = ((col % 3) + 3) % 3;
     return (r3 + c3) % 3 === 0;
   }
 
   /**
-   * Find nearest 3D ice-like lattice site for a particle at (px, py, pz) belonging to a seed.
-   * O(1) computation — iterates over bounded Z layers (3–5) × bounded XY candidates.
+   * Find nearest 3D ice Ih lattice site for a particle at (px, py, pz) belonging to a seed.
+   * O(1) computation — iterates over bounded Z layers (2–4) × bounded XY candidates.
    *
-   * Uses a HONEYCOMB sublattice: 1/3 of triangular grid sites are "ring centers" and
-   * excluded, leaving open 6-member rings with coordination 3 per layer.
+   * Uses a PROPER HONEYCOMB with two sublattices:
+   *   Sublattice A at Bravais lattice points
+   *   Sublattice B at Bravais lattice points + (0, a)
    *
-   * The hex lattice is defined by:
-   * - seed position (sx, sy) as origin
-   * - seed orientation theta as rotation angle
-   * - CONFIG.freeze.latticeSpacing as the column spacing
-   * - ABAB stacking: even layers use standard honeycomb, odd layers offset
+   * This gives exact coordination 3 for all atoms and open 6-member rings
+   * with diameter 2a = 56px — the correct ice Ih basal plane topology.
+   *
+   * ABAB stacking: odd layers offset by (L/3, 0) to interleave with even layers.
    */
   nearestSite(
     px: number, py: number, pz: number,
     seedX: number, seedY: number, seedTheta: number
   ): LatticeSite {
-    const spacing = CONFIG.freeze.latticeSpacing;
-    const rowSpacing = spacing * 0.8660254; // sqrt(3)/2
+    const a = CONFIG.freeze.latticeSpacing;       // NN distance (A↔B) = 28px
+    const L = a * 1.7320508075688772;             // lattice param = a√3 ≈ 48.50px
     const zSpacing = CONFIG.freeze.zLayerSpacing;
+
+    // Bravais lattice vectors
+    const a1x = L;
+    const a1y = 0;
+    const a2x = L * 0.5;
+    const a2y = a * 1.5; // = 3a/2 = 42.0px
+
+    // Sublattice B offset from A within each unit cell
+    const dBx = 0;
+    const dBy = a; // = 28px
+
+    // ABAB offset for odd layers: L/3 along x
+    // This interleaves layers without overlapping any even-layer positions.
+    // L/3 ≈ 16.17px — same magnitude as old offset, but geometrically motivated.
+    const ababX = L / 3;
+    const ababY = 0;
 
     // Vector from seed to particle (minimum image)
     let dx = px - seedX;
@@ -132,9 +151,11 @@ export class LatticeSystem {
     const layerCount = this.localLayerCount(lx, ly);
     const halfDepth = (layerCount - 1) * zSpacing * 0.5;
 
-    // ABAB offset for odd layers
-    const bOffsetX = spacing * 0.5;
-    const bOffsetY = rowSpacing / 3.0; // sqrt(3)/6 * spacing
+    // Front-layer bias: layers closer to camera (negative Z) get a distance bonus
+    const frontBias = zSpacing * 0.3;
+
+    // Inverse Bravais matrix determinant: det([a1x a2x; a1y a2y]) = a1x*a2y - a1y*a2x
+    const det = a1x * a2y; // since a1y = 0
 
     let bestDist2 = Infinity;
     let bestSx = 0;
@@ -142,58 +163,66 @@ export class LatticeSystem {
     let bestSz = 0;
     let bestLayer = 0;
 
-    // Iterate over Z layers
-    // Front-layer bias: layers closer to camera (negative Z) get a distance bonus.
-    // This makes frozen molecules preferentially assigned to front-visible layers,
-    // reducing visual clutter from farther layers while preserving 3D structure.
-    const frontBias = zSpacing * 0.3; // bias strength: 30% of layer spacing
-
     for (let k = 0; k < layerCount; k++) {
       const zLayer = -halfDepth + k * zSpacing;
       const dz = pz - zLayer;
       const dz2 = dz * dz;
 
-      // Front-layer bonus: reduce effective distance for front layers (lower Z)
-      // zLayer ranges from -halfDepth (front) to +halfDepth (back)
-      // bias = frontBias * (zLayer / halfDepth) adds distance penalty for back layers
+      // Front-layer bias
       const zBias = halfDepth > 0 ? frontBias * (zLayer / halfDepth) : 0;
       const biasedDz2 = dz2 + zBias * Math.abs(zBias);
-
-      // Early skip: if Z distance alone exceeds best 3D distance, skip
       if (biasedDz2 > bestDist2) continue;
 
       // Apply ABAB offset for odd layers
       const isOdd = k % 2 !== 0;
-      const offsetX = isOdd ? bOffsetX : 0;
-      const offsetY = isOdd ? bOffsetY : 0;
-      const adjLx = lx - offsetX;
-      const adjLy = ly - offsetY;
+      const offX = isOdd ? ababX : 0;
+      const offY = isOdd ? ababY : 0;
+      const adjLx = lx - offX;
+      const adjLy = ly - offY;
 
-      // Find nearest hex site in this layer, rejecting ring centers
-      const rowFloat = adjLy / rowSpacing;
-      const row0 = Math.floor(rowFloat);
+      // Find nearest unit cell via inverse Bravais transform
+      // [n] = [a2y  -a2x] [adjLx] / det
+      // [m]   [-a1y  a1x] [adjLy]
+      const nf = (a2y * adjLx - a2x * adjLy) / det;
+      const mf = a1x * adjLy / det; // simplified since a1y = 0
 
-      // Wider search radius to find valid honeycomb sites when nearest is a ring center
-      for (let dr = -1; dr <= 2; dr++) {
-        const row = row0 + dr;
-        const xOffset = (((row % 2) + 2) % 2) * spacing * 0.5;
-        const col = Math.round((adjLx - xOffset) / spacing);
+      const n0 = Math.floor(nf);
+      const m0 = Math.floor(mf);
 
-        for (let dc = -2; dc <= 2; dc++) {
-          const c = col + dc;
+      // Search 3×3 neighborhood of unit cells
+      for (let dn = -1; dn <= 1; dn++) {
+        for (let dm = -1; dm <= 1; dm++) {
+          const n = n0 + dn;
+          const m = m0 + dm;
 
-          // Skip ring-center sites (honeycomb sublattice filter)
-          if (this.isRingCenter(row, c)) continue;
+          // Cell origin (Bravais lattice point)
+          const cx = n * a1x + m * a2x;
+          const cy = n * a1y + m * a2y;
 
-          const sx = c * spacing + xOffset + offsetX;
-          const sy = row * rowSpacing + offsetY;
-          const ddx = sx - lx;
-          const ddy = sy - ly;
-          const dist2 = ddx * ddx + ddy * ddy + biasedDz2;
-          if (dist2 < bestDist2) {
-            bestDist2 = dist2;
-            bestSx = sx;
-            bestSy = sy;
+          // Check sublattice A
+          const sax = cx + offX;
+          const say = cy + offY;
+          const dax = sax - lx;
+          const day = say - ly;
+          const distA2 = dax * dax + day * day + biasedDz2;
+          if (distA2 < bestDist2) {
+            bestDist2 = distA2;
+            bestSx = sax;
+            bestSy = say;
+            bestSz = zLayer;
+            bestLayer = k;
+          }
+
+          // Check sublattice B
+          const sbx = cx + dBx + offX;
+          const sby = cy + dBy + offY;
+          const dbx = sbx - lx;
+          const dby = sby - ly;
+          const distB2 = dbx * dbx + dby * dby + biasedDz2;
+          if (distB2 < bestDist2) {
+            bestDist2 = distB2;
+            bestSx = sbx;
+            bestSy = sby;
             bestSz = zLayer;
             bestLayer = k;
           }
