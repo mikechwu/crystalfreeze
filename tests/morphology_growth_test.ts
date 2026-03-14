@@ -69,7 +69,7 @@ for (let i = 0; i < N; i++) {
 
 // Place seed at center
 await new Promise(r => setTimeout(r, 600));
-const seedOk = fs.placeSeed(cx, cy, d, N);
+const seedOk = fs.placeSeed(cx, cy, d, N, ps.eqZ);
 console.log(`placeSeed: ${seedOk}`);
 
 // Count initial frozen
@@ -86,7 +86,7 @@ const SAMPLE = 200;
 
 console.log('frame | frozen | sited | avgOO  | maxNN | >6nn');
 for (let frame = 0; frame < TOTAL; frame++) {
-  fs.update(d, N);
+  fs.update(d, N, ps.eqZ);
   ps.update(dt);
 
   if (frame % SAMPLE === 0 || frame === TOTAL - 1) {

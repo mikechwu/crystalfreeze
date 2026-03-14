@@ -8,6 +8,7 @@ import {
   OFF_SEED_ID, OFF_EQ_X, OFF_EQ_Y, OFF_Z,
 } from '../particles/ParticleSystem';
 import { LatticeSystem } from './LatticeSystem';
+import { siteKey3D, buildOccupiedSiteSet } from './occupancy';
 
 export interface Seed {
   id: number;
@@ -41,6 +42,7 @@ export class SeedRegistry {
    * Place a nucleation seed at world coordinates (wx, wy).
    * Immediately freezes nearby particles within seedRadius.
    * Assigns 3D lattice sites (x, y, z) from the thin-slab HCP lattice.
+   * Uses global occupancy to prevent cross-seed duplicate site assignments.
    */
   placeSeed(
     wx: number, wy: number,
@@ -66,12 +68,16 @@ export class SeedRegistry {
     const halfW = W * 0.5;
     const halfH = H * 0.5;
 
-    // Track occupied sites to prevent duplicate lattice-site assignments (3D keys)
-    const occupiedSites = new Set<number>();
+    // Build global occupied-site set from ALL existing assignments,
+    // not just this seed's pass. This prevents cross-seed duplicate sites.
+    const occupiedSites = buildOccupiedSiteSet(data, count, eqZ);
 
     for (let i = 0; i < count; i++) {
       const base = i * FLOATS_PER_PARTICLE;
-      if (data[base + OFF_ALPHA] > 0.5) continue; // already frozen
+
+      // Skip particles that already have a site assignment or are well-frozen
+      if (data[base + OFF_SEED_ID] >= 0) continue;
+      if (data[base + OFF_ALPHA] > 0.5) continue;
 
       let dx = data[base + OFF_PX] - wx;
       let dy = data[base + OFF_PY] - wy;
@@ -90,13 +96,10 @@ export class SeedRegistry {
           data[base + OFF_PX], data[base + OFF_PY], pz,
           seed.x, seed.y, seed.theta
         );
-        const rx = Math.round(site.x);
-        const ry = Math.round(site.y);
-        const rz = Math.round(site.z + 200);
-        const siteKey = rx * 1000000 + ry * 1000 + rz;
+        const key = siteKey3D(site.x, site.y, site.z);
 
-        if (!occupiedSites.has(siteKey)) {
-          occupiedSites.add(siteKey);
+        if (!occupiedSites.has(key)) {
+          occupiedSites.add(key);
           data[base + OFF_ALPHA] = Math.max(data[base + OFF_ALPHA], alpha);
           data[base + OFF_SEED_ID] = seed.id;
           data[base + OFF_EQ_X] = site.x;

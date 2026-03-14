@@ -62,7 +62,10 @@ export class ParticleSystem {
     this.fy = new Float32Array(count);
     this.torque = new Float32Array(count);
     this.omegaZ = new Float32Array(count);
-    this.spatialHash = new SpatialHash(CONFIG.interaction.cutoff);
+    this.spatialHash = new SpatialHash(CONFIG.interaction.cutoff, {
+      periodicX: true, periodicY: true,
+      worldWidth: CONFIG.world.width, worldHeight: CONFIG.world.height,
+    });
     this.frozenRefYaw = new Float32Array(count);
     this.frozenRefSet = new Uint8Array(count);
 

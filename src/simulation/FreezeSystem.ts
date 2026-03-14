@@ -11,6 +11,7 @@ import {
 import { SpatialHash } from '../utils/SpatialHash';
 import { LatticeSystem } from './LatticeSystem';
 import { SeedRegistry } from './SeedRegistry';
+import { siteKey3D, buildOccupiedSiteSet } from './occupancy';
 
 export class FreezeSystem {
   private lattice: LatticeSystem;
@@ -36,7 +37,10 @@ export class FreezeSystem {
     this.registry = new SeedRegistry(this.lattice);
     this.worldWidth = CONFIG.world.width;
     this.worldHeight = CONFIG.world.height;
-    this.frozenHash = new SpatialHash(CONFIG.freeze.propagationRadius);
+    this.frozenHash = new SpatialHash(CONFIG.freeze.propagationRadius, {
+      periodicX: true, periodicY: true,
+      worldWidth: CONFIG.world.width, worldHeight: CONFIG.world.height,
+    });
     this._temperature = CONFIG.temperature.initial;
     this._propagationRate = CONFIG.freeze.propagationRate;
   }
@@ -61,16 +65,6 @@ export class FreezeSystem {
     return seed !== null;
   }
 
-  /**
-   * Compute a unique numeric key for a 3D lattice site (rounded to 1px precision).
-   * Encodes (x, y, z) into a single number for Set<number> lookups.
-   */
-  private siteKey3D(x: number, y: number, z: number): number {
-    const rx = Math.round(x);
-    const ry = Math.round(y);
-    const rz = Math.round(z + 200); // shift z to positive range
-    return rx * 1000000 + ry * 1000 + rz;
-  }
 
   /**
    * Per-frame freezing front propagation + temperature-dependent melting.
@@ -143,14 +137,7 @@ export class FreezeSystem {
     if (freezeScale <= 0) return;
 
     // Build set of occupied 3D lattice sites
-    this.occupiedSites.clear();
-    for (let i = 0; i < count; i++) {
-      const base = i * FLOATS_PER_PARTICLE;
-      if (data[base + OFF_SEED_ID] >= 0) {
-        const key = this.siteKey3D(data[base + OFF_EQ_X], data[base + OFF_EQ_Y], eqZ[i]);
-        this.occupiedSites.add(key);
-      }
-    }
+    this.occupiedSites = buildOccupiedSiteSet(data, count, eqZ);
 
     // Propagate freezing front (temperature-modulated, 3D-aware)
     for (let i = 0; i < count; i++) {
@@ -316,7 +303,7 @@ export class FreezeSystem {
             }
 
             if (adjacentCount >= 2 && !wouldOverCoordinate) {
-              const siteKey = this.siteKey3D(site.x, site.y, site.z);
+              const siteKey = siteKey3D(site.x, site.y, site.z);
               if (!this.occupiedSites.has(siteKey)) {
                 this.occupiedSites.add(siteKey);
                 data[base + OFF_SEED_ID] = closestSeedId;

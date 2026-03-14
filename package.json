@@ -14,13 +14,17 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "test": "npx tsx tests/slab3d_growth_test.ts && npx tsx tests/layer_readability_test.ts && npx tsx tests/ice_honeycomb_test.ts && npx tsx tests/ice_stability_test.ts"
+    "test": "tsx tests/slab3d_growth_test.ts && tsx tests/layer_readability_test.ts && tsx tests/ice_honeycomb_test.ts && tsx tests/ice_stability_test.ts && tsx tests/periodic_seam_test.ts && tsx tests/seed_occupancy_test.ts",
+    "test:core": "tsx tests/ice_honeycomb_test.ts && tsx tests/ice_stability_test.ts && tsx tests/periodic_seam_test.ts && tsx tests/seed_occupancy_test.ts",
+    "test:growth": "tsx tests/morphology_growth_test.ts && tsx tests/hex_growth_sim_test.ts",
+    "test:diagnostics": "tsx tests/slab3d_growth_test.ts && tsx tests/layer_readability_test.ts && tsx tests/morphology_growth_test.ts && tsx tests/hex_growth_sim_test.ts"
   },
   "dependencies": {
     "three": "^0.170.0"
   },
   "devDependencies": {
     "@types/three": "^0.170.0",
+    "tsx": "^4.19.0",
     "typescript": "^5.7.0",
     "vite": "^6.0.0"
   }

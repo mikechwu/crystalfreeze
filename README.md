@@ -42,6 +42,15 @@ npm run preview    # Preview the built output locally
 
 Output goes to `dist/` — deploy to any static host (Vercel, Netlify, GitHub Pages, etc.).
 
+## Tests
+
+```bash
+npm test              # Full suite: structure, stability, periodic seam, seed occupancy
+npm run test:core     # Fast: lattice structure + periodic correctness + occupancy
+npm run test:growth   # Growth simulations (morphology + hex growth)
+npm run test:diagnostics  # All exploratory / diagnostic tests
+```
+
 ## Controls
 
 | Control | Action |
@@ -78,7 +87,7 @@ Output goes to `dist/` — deploy to any static host (Vercel, Netlify, GitHub Pa
 - **WebGL2** — point sprites with per-pixel fragment shading
 - **GLSL 300 es** — inline shaders with quaternion rotation (Rodrigues' formula)
 - **Langevin dynamics** — semi-implicit Euler integration with Morse-like (tanh-saturated) springs
-- **Spatial hashing** — O(1) neighbor lookup for force computation and H-bond detection
+- **Spatial hashing** — O(1) neighbor lookup with periodic XY wrapping for force computation, freeze propagation, and H-bond detection
 - **Honeycomb lattice** — two-sublattice ice Ih honeycomb with ABAB stacking (L/3 offset), coordination cap 4 (3 in-plane + 1 inter-layer)
 
 ## License

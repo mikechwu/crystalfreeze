@@ -76,7 +76,10 @@ export class ParticleRenderer {
     // Max H-bonds: each frozen molecule can have ~4, so max lines ≈ 2*N
     // Each line = 2 vertices, each vertex = 3 floats (x, y, strength)
     this.hbondData = new Float32Array(particleCount * 2 * 2 * 3);
-    this.hbondHash = new SpatialHash(35); // O-O < 3.5 Å → ~31px at σ=24
+    this.hbondHash = new SpatialHash(35, {
+      periodicX: true, periodicY: true,
+      worldWidth: CONFIG.world.width, worldHeight: CONFIG.world.height,
+    }); // O-O < 3.5 Å → ~31px at σ=24
 
     this.setupVAO();
     this.setupHbondVAO();

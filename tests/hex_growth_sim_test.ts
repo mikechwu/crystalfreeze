@@ -103,7 +103,7 @@ for (let i = 0; i < liquidPositions.length; i++) {
 // We need the FreezeSystem to know about seed 0.
 // Wait for seedCooldown then place seed (which will re-freeze already-frozen core)
 await new Promise(r => setTimeout(r, 600)); // wait for cooldown
-const seedOk = fs.placeSeed(cx, cy, d, N);
+const seedOk = fs.placeSeed(cx, cy, d, N, ps.eqZ);
 console.log(`placeSeed result: ${seedOk}`);
 
 // Count frozen
@@ -121,7 +121,7 @@ const SAMPLE = 60;
 console.log('frame | frozen | sited | avgOO  | maxOOerr | transKE   | rotKE     | maxOmega | maxDrift');
 
 for (let frame = 0; frame < TOTAL; frame++) {
-  fs.update(d, N);
+  fs.update(d, N, ps.eqZ);
   ps.update(dt);
 
   if (frame % SAMPLE === 0 || frame === TOTAL - 1) {
